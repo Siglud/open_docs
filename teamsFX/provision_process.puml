@@ -1,0 +1,155 @@
+@startuml Provision
+autonumber
+
+actor User as user
+participant Solution
+participant ProjectSetting as pj
+participant Telemetry as tel
+participant Inputs as input
+participant Env as env
+participant M365Api as m3
+participant AzureApi as az
+participant Context as ctx
+participant FeatureFlag as ff
+participant OS as os
+participant ProgressBar as pb
+
+Solution -> tel: send provision start telemetry
+Solution -> pj: get solutionSettings
+alt input.projectPath not exits
+Solution -> Solution: throw System Error
+end
+Solution -> m3: get M365 App studio token
+alt M365 token get error
+Solution -> Solution: result is error
+end
+Solution -> env: init env[state][plugin.appStudio]
+Solution -> env: init env[state][solution]
+Solution -> TokenProvider: get M365 tenant Id
+alt tenant id get error
+Solution -> Solution: result is error
+end
+alt env[state][plugin.appStudio] exists and tenant id not equals env[state][plugin.appStudio]
+Solution -> Solution: result is error
+end
+alt env[state][plugin.appStudio] not exists
+Solution -> env: set tenant id to env[state][plugin.appStudio][tenantId]
+Solution -> env: set tenant id to env[state][solution][teamsAppTenantId]
+end
+alt ctx projectSetting.solutionSettings.hostType === Azure && projectSetting.solutionSettings.activeResourcePlugins contains Azure resource
+    alt projectSetting.activeResourcePlugins contains fx-resource-aad-app-for-teams
+        alt ctx.permissionRequestProvider not exists
+            Solution -> ctx: init permissionRequestProvider
+        end
+        Solution -> ff: get FeatureFlag AadManifest
+        alt AadManifest disable
+            Solution -> os: check project path is writeable
+            alt path is not writeable
+                Solution -> Solution: result is error
+            end
+        end
+        Solution -> Solution: Ok
+    end
+    Solution -> az: get subscription in user's Azure account
+    alt reasonable subscription available
+        Solution -> env: set subscriptionId to env[state][solution][subscriptionId]
+        Solution -> env: set subscription name to env[state][solution][subscriptionName]
+    else cannot find available subscription
+        Solution -> Solution: return UserError
+    end
+    Solution -> az: get Azure account token
+    Solution -> tel: send telemetry for check resource group
+    Solution -> Solution: create alpha number app name
+    Solution -> Solution: create default group name
+    alt resource group name exists in inputs
+        Solution -> az: get resource group info
+        alt resource group not exists or info error
+            alt in VS platform && inputs.targetResourceLocationName exists
+                Solution -> Solution: create new resource group
+            end
+            Solution -> Solution: return error
+        else resource group exists
+            alt resource.value not exists
+                Solution -> Solution: return UserError as resource group not exists
+            end
+        end
+    else env.config.azure.resourceGroupName exists
+        Solution -> az: get resource group info
+        alt resource group not exists or info error
+            alt in VS platform && inputs.targetResourceLocationName exists
+                Solution -> Solution: create new resource group
+            end
+            Solution -> Solution: return error
+        else resource group exists
+            alt resource.value not exists
+                Solution -> Solution: return UserError as resource group not exists
+            end
+        end
+    else env.state.solution.resourceGroupName exists && env.state.solution.location exists
+        Solution -> az: check resource group exists
+        alt check error
+            Solution -> Solution: return error
+        end
+    else
+        Solution -> user: Ask user to create a new resource group or use exists resource group
+    end
+end
+Solution -> tel: send telemetry for use resource group
+Solution -> env: set resource group name to env.state.solution.resourceGroupName = resourceGroupInfo.name;
+Solution -> env: set location to env.state.solution.location
+Solution -> env: set resource name suffix to env.state.solution.resourceNameSuffix
+
+Solution -> az: get Azure account token
+Solution -> user: ask user for do provision
+
+alt need create new resource group
+    Solution -> az: create new resource grup
+    alt create resource group error
+        Solution -> Solution: return error
+    end
+end
+
+Solution -> ctx: get plugin list from ctx.projectSettings.solutionSettings
+
+alt ext.projectSettings.solutionSettings not exits || solutionSettings.capabilities == TabSSO
+    Solution -> Solution: add app studio plugin to plugin list
+end
+
+Solution -> env: set env.state.solution.provisionSucceeded to false
+
+loop for all the plugin
+    Solution -> plugin: call plugin.provisionResource
+end
+
+alt plugin provision error
+    Solution -> Solution: return error
+end
+
+Solution -> env: set env.state[fx-resource-appstudio][teamsAppId] to global vars
+
+Solution -> tel: send telemetry for ready to deploy ARM templates
+Solution -> pb: show deploy
+Solution -> os: get parameters from azure.parameters.${EnvNamePlaceholder}.json
+
+Solution -> os: ensure bicep tools exists
+alt bicep tools not exists
+    Solution -> github: get newest bicep tols version
+    Solution -> github: download newest (or fallback) version from release page
+    Solution -> os: install bicep tools
+end
+
+Solution -> os: compile bicep to json
+
+Solution -> az: call api deploy json
+Solution -> az: poll check resource status until finished
+
+alt provision error
+    Solution -> Solution: return error
+end
+
+alt result is Ok
+Solution -> tel: send provision telemetry success
+else result is Error
+Solution -> tel: send provision telemetry error info
+end
+@enduml
