@@ -1,0 +1,69 @@
+@startuml deploy
+autonumber
+
+actor User as user
+participant Solution
+participant Telemetry as tel
+participant Env as env
+participant M365Api as m3
+participant AzureApi as az
+participant Context as ctx
+participant Plugin as pg
+
+Solution -> tel: send deploy start telemetry
+alt ctx.projectSetting.solutionSettings.hostType == Azure && not provisioned
+    Solution -> Solution: return error
+end
+alt ctx.projectSetting.solutionSettings.hostType != Azure
+    Solution -> m3: request App studio token
+    Solution -> env: check m365 tenantId in env
+    alt env tenantId exists but not equals tenantId in app studio response
+        Solution -> Solution: return UserError
+    end
+    alt token request fail
+        Solution -> Solution: throw SystemError
+    end
+end
+alt env.envName != local && input[include-aad-manifest] == no && input.platform != VSCode
+    alt env not contains subscription id
+        Solution -> az: get subscription from user account
+    end
+    Solution -> az: get user Azure token
+    Solution -> az: list user subscription
+    Solution -> Solution: find subscription in env.subscriptionId
+    alt subscription no find
+        Solution -> Solution: return UserError
+    end
+    Solution -> ctx: check ctx.projectSetting.programmingLanguage
+    alt if lang != csharp
+        alt deploy from VSCode and need deploy AAD manifest
+            Solution -> Solution: need deploy AAD
+        end
+        alt deploy from CLI and need deploy AAD manifest
+            Solution -> Solution: never deploy AAD
+        end
+        alt deploy list is empty
+            Solution -> Solution: throw UserError
+        end
+    end
+end
+
+Solution -> ctx: get all plugin from ctx.projectSetting
+
+alt if plugin contains Azure plugin && is ctx.projectSetting.solutionSettings.hostType == Azure
+    Solution -> user: message to user, ask for deploy
+end
+
+loop for every plugin
+    alt if plugin has deploy method && (lang == csharp || need deploy this plugin)
+        Solution -> pg: call plugin.deploy
+    end
+end
+
+alt deploy success
+    Solution -> user: show deploy success
+alt deploy fail
+    Solution -> user: show deploy error
+end
+
+@enduml

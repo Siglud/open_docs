@@ -1,0 +1,58 @@
+@startuml deploy bot
+autonumber
+actor plugin
+participant Context as ctx
+participant Constant as const
+participant OS as os
+participant ProgressBar as pb
+participant Azure as az
+
+plugin -> inputs: check project path
+plugin -> ctx: check projectSetting.programmingLanguage exists
+plugin -> ctx: get app project file (package.json or csproj)
+plugin -> ctx: get projectSetting.pluginSettings.bot.host-type
+plugin -> const: join project path and deploy folder from const
+plugin -> const: get deployment.json location
+plugin -> const: get deployment.zip location
+plugin -> os: check .hostTypeIgnore file exists, or create a new one
+plugin -> env: get provisioned bot web app resource id
+plugin -> os: check .deployment folder exists or create a new one
+plugin -> os: check deployment.json exists or create a new one
+plugin -> os: check file last changed time
+alt no file changed
+    plugin -> plugin: return deploy success
+end
+plugin -> pb: start new deploy progress
+plugin -> pb: show install dependencies
+plugin -> os: local build
+plugin -> pb: show create package
+plugin -> plugin: create file filter list
+plugin -> os: create zip buffer
+plugin -> pb: show uploading in progress
+plugin -> ctx: generate Azure deploy Credentials
+plugin -> const: get deploy endpoint
+plugin -> az: post zip buffer to deploy endpoint
+
+loop check deploy status
+    alt exceed retry times limit
+        plugin -> plugin: throw DeployTimeoutError
+    end
+    alt check response code is 200
+        plugin -> plugin: deploy success
+    end
+    alt check response code is 201
+        plugin -> plugin: continue loop
+    end
+    alt other response code
+        plugin -> plugin: throw DeployStatusError
+    end
+end
+
+alt if deploy to Azure function
+    plugin -> az: restart Azure function
+end
+
+plugin -> os: save last deploy time to deployment.json
+plugin -> os: save zip buffer to deployment.zip
+plugin -> pb: close progress bar
+@enduml
