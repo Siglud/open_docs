@@ -1,0 +1,38 @@
+@startuml future_deploy
+autonumber
+
+actor User as user
+participant Solution as sol
+participant Context as ctx
+participant Telemetry as tel
+
+sol -> sol: call build method, build current project
+
+sol -> sol: call package method, create or update deployment.zip
+note right
+or do nothin(like deploy to SPFx or Azure Storage)
+just skip this process
+end note
+
+sol -> sol: check deploySettings.json check user deploy setting
+sol -> sol: get user accessToeken from deploySettings.json
+
+alt deploy to SPFx
+    sol -> sol: call SPFx deploy method
+else deploy to Azure Function
+    sol -> sol: call Function deploy method
+else deploy to Azure App Service
+    sol -> sol: call Azure App Service deploy method
+else deploy to Azure Storage
+    sol -> sol: call Azure Storage deploy method
+end
+
+alt deploy success
+    sol -> user: show deploy success
+    sol -> ctx: save deploy process chain
+alt deploy fail
+    sol -> user: show deploy error
+end
+
+
+@enduml
